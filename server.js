@@ -1,12 +1,10 @@
 /*
- * NexMeet — server.js
+ * NexMeet — server.js (FIXED VERSION)
  * Node.js + Socket.io Signaling Server
  *
- * Responsibilities:
- *  1. Track which users are in which rooms
- *  2. Relay WebRTC offers, answers, and ICE candidates between peers
- *  3. Relay chat messages
- *  4. Notify peers when someone joins or leaves
+ * Added:
+ *  - screen-share-started relay
+ *  - screen-share-stopped relay
  */
 
 const express = require("express");
@@ -18,7 +16,6 @@ const cors    = require("cors");
 const app    = express();
 const server = http.createServer(app);
 
-// CORS: allow all origins (tighten this in production if needed)
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -27,7 +24,7 @@ const io = new Server(server, {
 });
 
 app.use(cors());
-app.get("/", (req, res) => res.send("NexMeet Signaling Server is running ✅"));
+app.get("/",       (req, res) => res.send("NexMeet Signaling Server is running ✅"));
 app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 
 // ── In-memory room store ─────────────────────────────
@@ -42,7 +39,6 @@ io.on("connection", (socket) => {
   socket.on("join-room", ({ room, name }) => {
     socket.join(room);
 
-    // Initialize room if it doesn't exist
     if (!rooms[room]) rooms[room] = {};
 
     // Tell the newcomer about existing users
@@ -55,7 +51,7 @@ io.on("connection", (socket) => {
     // Tell existing users about the newcomer
     socket.to(room).emit("user-joined", { id: socket.id, name });
 
-    // Register the user in the room map
+    // Register user in room
     rooms[room][socket.id] = { name };
 
     console.log(`[room] ${name} (${socket.id}) joined "${room}" | ${Object.keys(rooms[room]).length} user(s)`);
@@ -78,13 +74,22 @@ io.on("connection", (socket) => {
 
   // ── Chat message ─────────────────────────────────
   socket.on("chat-message", ({ room, name, text }) => {
-    // Broadcast to everyone else in the room
     socket.to(room).emit("chat-message", { name, text });
   });
 
   // ── Mute status ───────────────────────────────────
   socket.on("mute-status", ({ room, muted }) => {
     socket.to(room).emit("mute-status", { id: socket.id, muted });
+  });
+
+  // ── Screen share started ─────────────────────────
+  socket.on("screen-share-started", ({ room, name }) => {
+    socket.to(room).emit("screen-share-started", { name });
+  });
+
+  // ── Screen share stopped ─────────────────────────
+  socket.on("screen-share-stopped", ({ room, name }) => {
+    socket.to(room).emit("screen-share-stopped", { name });
   });
 
   // ── Disconnect ───────────────────────────────────
@@ -94,7 +99,7 @@ io.on("connection", (socket) => {
         const name = rooms[room][socket.id].name;
         delete rooms[room][socket.id];
         if (Object.keys(rooms[room]).length === 0) {
-          delete rooms[room]; // clean up empty room
+          delete rooms[room];
         }
         socket.to(room).emit("user-left", { id: socket.id, name });
         console.log(`[-] ${name} (${socket.id}) left "${room}"`);
